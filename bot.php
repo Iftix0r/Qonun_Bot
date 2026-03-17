@@ -66,6 +66,24 @@ if (!$update) exit;
 
 $message = $update['message'] ?? null;
 
+define('TEST_USER_ID', 2114098498);
+
+// Test user guruhga xabar yozsa - verify so'ra
+if ($message && isset($message['text']) && ($message['chat']['type'] ?? '') !== 'private') {
+    $senderId = $message['from']['id'] ?? 0;
+    $chatId   = $message['chat']['id'];
+    if ($senderId === TEST_USER_ID) {
+        $db  = loadDB();
+        $key = "{$senderId}_{$chatId}";
+        if (!isset($db[$key])) {
+            restrictUser($chatId, $senderId);
+            $msgId = sendVerifyMessage($chatId, $message['from']);
+            addPending($senderId, $chatId, $msgId);
+        }
+        exit;
+    }
+}
+
 // /start komandasi
 if ($message && isset($message['text'])) {
     $text   = $message['text'];
