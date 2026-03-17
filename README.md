@@ -82,4 +82,4 @@ Har bir guruh va foydalanuvchi alohida `(user_id, chat_id)` juftligi bilan bazad
 
 ## 📄 Litsenziya
 
-MIT License © 2025 [Iftix0r](https://github.com/Iftix0r)
+MIT License © 2026 [Iftix0r](https://github.com/Iftix0r)
