@@ -5,9 +5,9 @@ require_once 'db.php';
 function apiRequest($method, $params) {
     $ch = curl_init(API_URL . $method);
     curl_setopt_array($ch, [
-        CURLOPT_POST        => true,
-        CURLOPT_POSTFIELDS  => json_encode($params),
-        CURLOPT_HTTPHEADER  => ['Content-Type: application/json'],
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($params),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
     ]);
     $result = curl_exec($ch);
@@ -28,28 +28,21 @@ function allowUser($chatId, $userId) {
         'chat_id'     => $chatId,
         'user_id'     => $userId,
         'permissions' => [
-            'can_send_messages'       => true,
-            'can_send_media_messages' => true,
-            'can_send_other_messages' => true,
+            'can_send_messages'         => true,
+            'can_send_media_messages'   => true,
+            'can_send_other_messages'   => true,
             'can_add_web_page_previews' => true,
         ],
     ]);
-}
-
-function kickUser($chatId, $userId) {
-    apiRequest('banChatMember',   ['chat_id' => $chatId, 'user_id' => $userId]);
-    apiRequest('unbanChatMember', ['chat_id' => $chatId, 'user_id' => $userId]);
 }
 
 function sendVerifyMessage($chatId, $user) {
     $name   = htmlspecialchars(trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')));
     $userId = $user['id'];
 
-    $text = "👋 Salom, <b>{$name}</b>!\n\nGuruhga xush kelibsiz. Iltimos, guruhga yozish uchun <b>inson ekanligingizni tasdiqlang</b>.\n\n⏳ <b>1 soat</b> ichida tasdiqlamasangiz, guruhdan chiqarilasiz.";
-
     $result = apiRequest('sendMessage', [
         'chat_id'      => $chatId,
-        'text'         => $text,
+        'text'         => "👋 Salom, <b>{$name}</b>!\n\nGuruhga xush kelibsiz. Iltimos, guruhga yozish uchun <b>inson ekanligingizni tasdiqlang</b>.\n\n⏳ <b>1 soat</b> ichida tasdiqlamasangiz, guruhdan chiqarilasiz.",
         'parse_mode'   => 'HTML',
         'reply_markup' => [
             'inline_keyboard' => [[
@@ -64,11 +57,44 @@ function sendVerifyMessage($chatId, $user) {
 $update = json_decode(file_get_contents('php://input'), true);
 if (!$update) exit;
 
-$message = $update['message'] ?? null;
-
 define('TEST_USER_ID', 2114098498);
 
-// Test user guruhga xabar yozsa - verify so'ra
+$message = $update['message'] ?? null;
+
+// 1. Yangi a'zo - chat_member update (supergroup uchun)
+if (isset($update['chat_member'])) {
+    $cm     = $update['chat_member'];
+    $chatId = $cm['chat']['id'];
+    $user   = $cm['new_chat_member']['user'];
+    $status = $cm['new_chat_member']['status'];
+    $oldStatus = $cm['old_chat_member']['status'];
+
+    // Faqat yangi qo'shilganlar: member yoki restricted bo'lib kelgan
+    if (in_array($status, ['member', 'restricted']) && in_array($oldStatus, ['left', 'kicked'])) {
+        if ($user['is_bot'] ?? false) exit;
+
+        $userId = $user['id'];
+        restrictUser($chatId, $userId);
+        $msgId = sendVerifyMessage($chatId, $user);
+        addPending($userId, $chatId, $msgId);
+    }
+    exit;
+}
+
+// 2. Yangi a'zo - oddiy guruh uchun (new_chat_members)
+if ($message && isset($message['new_chat_members'])) {
+    $chatId = $message['chat']['id'];
+    foreach ($message['new_chat_members'] as $user) {
+        if ($user['is_bot'] ?? false) continue;
+        $userId = $user['id'];
+        restrictUser($chatId, $userId);
+        $msgId = sendVerifyMessage($chatId, $user);
+        addPending($userId, $chatId, $msgId);
+    }
+    exit;
+}
+
+// 3. Test user guruhga xabar yozsa - verify so'ra
 if ($message && isset($message['text']) && ($message['chat']['type'] ?? '') !== 'private') {
     $senderId = $message['from']['id'] ?? 0;
     $chatId   = $message['chat']['id'];
@@ -84,44 +110,26 @@ if ($message && isset($message['text']) && ($message['chat']['type'] ?? '') !== 
     }
 }
 
-// /start komandasi
-if ($message && isset($message['text'])) {
-    $text   = $message['text'];
+// 4. /start komandasi
+if ($message && isset($message['text']) && $message['text'] === '/start') {
     $chatId = $message['chat']['id'];
     $type   = $message['chat']['type'];
-
-    if ($text === '/start') {
-        if ($type === 'private') {
-            apiRequest('sendMessage', [
-                'chat_id'    => $chatId,
-                'text'       => "👋 Salom! Men guruhlarni bot va nakrutkalardan himoya qiluvchi botman.\n\n📌 Meni guruhga <b>admin</b> qilib qo'shing va quyidagi huquqlarni bering:\n• Foydalanuvchilarni chiqarish\n• Xabarlarni o'chirish\n• Foydalanuvchilarni cheklash\n\nShundan so'ng guruhga yangi odam qo'shilganda avtomatik ishlaydi! ✅",
-                'parse_mode' => 'HTML',
-            ]);
-        } else {
-            apiRequest('sendMessage', [
-                'chat_id'    => $chatId,
-                'text'       => "✅ Bot faol! Yangi a'zolar qo'shilganda avtomatik tekshiriladi.",
-                'parse_mode' => 'HTML',
-            ]);
-        }
+    if ($type === 'private') {
+        apiRequest('sendMessage', [
+            'chat_id'    => $chatId,
+            'text'       => "👋 Salom! Men guruhlarni bot va nakrutkalardan himoya qiluvchi botman.\n\n📌 Meni guruhga <b>admin</b> qilib qo'shing va quyidagi huquqlarni bering:\n• Foydalanuvchilarni chiqarish\n• Xabarlarni o'chirish\n• Foydalanuvchilarni cheklash\n\nShundan so'ng guruhga yangi odam qo'shilganda avtomatik ishlaydi! ✅",
+            'parse_mode' => 'HTML',
+        ]);
+    } else {
+        apiRequest('sendMessage', [
+            'chat_id' => $chatId,
+            'text'    => "✅ Bot faol! Yangi a'zolar qo'shilganda avtomatik tekshiriladi.",
+        ]);
     }
+    exit;
 }
 
-// Yangi a'zo qo'shilganda
-if ($message && isset($message['new_chat_members'])) {
-    $chatId = $message['chat']['id'];
-
-    foreach ($message['new_chat_members'] as $user) {
-        if ($user['is_bot'] ?? false) continue;
-
-        $userId = $user['id'];
-        restrictUser($chatId, $userId);
-        $msgId = sendVerifyMessage($chatId, $user);
-        addPending($userId, $chatId, $msgId);
-    }
-}
-
-// Callback - "Men insonman" tugmasi bosilganda
+// 5. Callback - "Men insonman" tugmasi
 if (isset($update['callback_query'])) {
     $cb        = $update['callback_query'];
     $data      = $cb['data'];
@@ -152,4 +160,5 @@ if (isset($update['callback_query'])) {
 
         apiRequest('answerCallbackQuery', ['callback_query_id' => $cb['id']]);
     }
+    exit;
 }
