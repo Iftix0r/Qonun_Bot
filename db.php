@@ -1,30 +1,33 @@
 <?php
-function getDB() {
-    $db = new PDO('sqlite:' . __DIR__ . '/pending.db');
-    $db->exec("CREATE TABLE IF NOT EXISTS pending (
-        user_id INTEGER,
-        chat_id INTEGER,
-        message_id INTEGER,
-        joined_at INTEGER,
-        PRIMARY KEY (user_id, chat_id)
-    )");
-    return $db;
+define('DB_FILE', __DIR__ . '/pending.json');
+
+function loadDB() {
+    if (!file_exists(DB_FILE)) return [];
+    return json_decode(file_get_contents(DB_FILE), true) ?? [];
+}
+
+function saveDB($data) {
+    file_put_contents(DB_FILE, json_encode($data, JSON_PRETTY_PRINT));
 }
 
 function addPending($userId, $chatId, $messageId) {
-    $db = getDB();
-    $stmt = $db->prepare("INSERT OR REPLACE INTO pending (user_id, chat_id, message_id, joined_at) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$userId, $chatId, $messageId, time()]);
+    $db = loadDB();
+    $db["{$userId}_{$chatId}"] = [
+        'user_id'    => $userId,
+        'chat_id'    => $chatId,
+        'message_id' => $messageId,
+        'joined_at'  => time(),
+    ];
+    saveDB($db);
 }
 
 function removePending($userId, $chatId) {
-    $db = getDB();
-    $db->prepare("DELETE FROM pending WHERE user_id = ? AND chat_id = ?")->execute([$userId, $chatId]);
+    $db = loadDB();
+    unset($db["{$userId}_{$chatId}"]);
+    saveDB($db);
 }
 
 function getExpired($timeout) {
-    $db = getDB();
-    $stmt = $db->prepare("SELECT * FROM pending WHERE joined_at < ?");
-    $stmt->execute([time() - $timeout]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $db = loadDB();
+    return array_filter($db, fn($row) => $row['joined_at'] < time() - $timeout);
 }
